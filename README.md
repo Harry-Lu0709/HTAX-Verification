@@ -11,8 +11,8 @@ A Universal Verification Methodology (UVM) testbench for a four-port **HyperTran
 - [3. Configurable Parameters](#3-configurable-parameters)
 - [4. TX Interface Specification](#4-tx-interface-specification)
 - [5. RX Interface Specification](#5-rx-interface-specification)
-- [6. UVM Verification Environment](#7-uvm-verification-environment)
-- [7. Test Cases and Expected Results](#9-test-cases-and-expected-results)
+- [6. UVM Verification Environment](#6-uvm-verification-environment)
+- [7. Test Cases and Expected Results](#7-test-cases-and-expected-results)
 
 
 ## 1. Overview
@@ -117,6 +117,17 @@ The TX interface is the ingress path from an external FU into HTAX. It includes 
 | `tx_eot` | `1 bit` | **FU -> HTAX** | **End of transaction:** asserted alongside the final data beat for one clock cycle. |
 | `tx_release_gnt` | `1 bit` | **FU -> HTAX** | Releases the current grant / initiates re-arbitration, allowing arbitration for another transfer to overlap the current one. The specification describes it as a one-cycle pulse preceding `tx_eot`. |
 
+### TX Interface Timing Example
+
+The following waveform illustrates a five-beat packet
+transmission using the HTAX TX interface.
+
+<p align="center">
+  <img src="images/htax_tx_timing.png"
+       alt="HTAX TX Timing Diagram"
+       width="600">
+</p>
+
 ## 5. RX Interface Specification
 
 The RX interface is the egress path from HTAX to the destination external FU. The receiver controls which virtual channels it is ready to accept.
@@ -131,7 +142,16 @@ The RX interface is the egress path from HTAX to the destination external FU. Th
 | `rx_sot` | `[VC-1:0]` | **HTAX -> FU** | **Start of transaction:** one-hot VC indication asserted with the first received data beat. |
 | `rx_eot` | `1 bit` | **HTAX -> FU** | **End of transaction:** asserted with the final received data beat for one clock cycle. |
 
+### RX Interface Timing Example
 
+The following waveform illustrates a four-beat packet
+reception through the HTAX RX interface.
+
+<p align="center">
+  <img src="images/htax_rx_timing.png"
+       alt="HTAX RX Timing Diagram"
+       width="600">
+</p>
 
 ## 6. UVM Verification Environment
 
@@ -141,7 +161,7 @@ The source-driven testbench uses **four active TX agents**, **four passive RX ag
 
 ```text
 Packet Transmission Flow
-                   ========================
+=================================================
 
       htax_seqs.sv
             |
