@@ -13,7 +13,7 @@ A Universal Verification Methodology (UVM) testbench for a four-port **HyperTran
 - [5. RX Interface Specification](#5-rx-interface-specification)
 - [6. UVM Verification Environment](#6-uvm-verification-environment)
 - [7. Test Cases and Expected Results](#7-test-cases-and-expected-results)
-
+- [8. UVM Notes](#8-uvm-notes)
 
 ## 1. Overview
 
@@ -165,6 +165,8 @@ Packet Transmission Flow
 
       htax_seqs.sv
             |
+            |   --- connect seq with sequencer in _test.sv -> run_phase() -> .start
+            |
             v
    htax_sequencer_c.sv
             |
@@ -211,4 +213,48 @@ The scoreboard uses a **separate FIFO queue for each destination port**:
 | `mix_sequence_test` | Sequentially runs six directed/randomized sequences: fixed destination, short packets, long packets with short delays, medium packets with fixed VC, port sweep, and random traffic | Depends on the sequence definitions | All generated TX/RX packets match; all four queues empty; zero UVM errors/fatals and no unexpected assertion failures. |
 
 
+## 8. UVM Notes
 
+### 8.1 UVM Phase Flow Chart
+
+```text
+
+htax_top.sv
+    |
+    | run_test()
+    v
+build_phase
+    | htax_env.sv             Create Agents & Scoreboard
+    | htax_tx_agent_c.sv      Create Driver, Sequencer, Monitor
+    | htax_rx_agent_c.sv      Create RX Monitor
+    | Driver / Monitor        Get Virtual Interfaces by uvm_config_db::get()
+    v
+connect_phase
+    | htax_tx_agent_c.sv      Driver <--> Sequencer
+    | htax_env.sv             Monitors --> Scoreboard
+    v
+run_phase
+    | _test.sv                Start Sequences
+    | htax_tx_driver_c.sv     Drive TX Signals
+    | htax_tx_monitor_c.sv    Capture TX Packets
+    | htax_rx_monitor_c.sv    Capture RX Packets
+    | htax_scoreboard_c.sv    Compare TX/RX Packets via write()
+    v
+extract_phase
+    | UVM default behavior
+    v
+check_phase
+    | htax_scoreboard_c.sv    Check Unmatched Packets
+    v
+report_phase
+    | UVM Framework          Report Error Statistics
+    v
+final_phase
+
+```
+
+### 8.2 HTAX UVM Phase File
+
+| Phase | Width | Direction | Description |
+|---|---|---|---|
+| `tx_outport_req` | `[PORTS-1:0]` | **FU -> HTAX** | One-hot request for the destination output port. A sender requests the output port to which the packet should be delivered. |
