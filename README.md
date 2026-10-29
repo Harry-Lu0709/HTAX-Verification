@@ -1,10 +1,10 @@
 # HTAX Crossbar Switch Verification
 
-**SystemVerilog | UVM | Assertions | Packet-Level Scoreboard**
+**SystemVerilog | UVM | SystemVerilog Assertions (SVA) | Packet-Level Scoreboard**
 
 A Universal Verification Methodology (UVM) testbench for a four-port **HyperTransport Advanced X-Bar (HTAX)** crossbar switch. The project verifies that packets injected through a transmit (TX) interface reach the intended receive (RX) interface with the correct **destination port, virtual channel, length, and payload**.
 
-The protocol overview below is based on *HyperTransport Advanced X-Bar (HTAX) Specification*, version 0.14, by Heiner Litz (Computer Architecture Group, University of Heidelberg). The verification workflow follows the Texas A&M University CSCE 616 HTAX lab assignments, including the RX monitor and scoreboard exercise.
+The protocol overview below is based on *HyperTransport Advanced X-Bar (HTAX) Specification*, version 0.14, by Heiner Litz (Computer Architecture Group, University of Heidelberg). The **UVM architecture and file inventory are grounded in the supplied SystemVerilog sources**, with explicit notes wherever the uploaded files do not yet form a complete, connected build. The test descriptions also reference the Texas A&M University CSCE 616 HTAX lab workflow.
 
 ## Table of Contents
 
@@ -18,7 +18,7 @@ The protocol overview below is based on *HyperTransport Advanced X-Bar (HTAX) Sp
 - [8. Scoreboard Design](#8-scoreboard-design)
 - [9. Test Cases and Expected Results](#9-test-cases-and-expected-results)
 - [10. Running the Simulation](#10-running-the-simulation)
-- [11. Repository Structure](#11-repository-structure)
+- [11. Source File Inventory](#11-source-file-inventory)
 - [12. Verification Scope and Notes](#12-verification-scope-and-notes)
 
 ## 1. Overview
@@ -90,17 +90,17 @@ Legend: TX = FU -> HTAX (injection); RX = HTAX -> FU (delivery).
 | `VC` | Number of supported virtual channels | Determines the width of VC request, grant, and SOT vectors |
 | `WIDTH` | Width of the payload bus, in bits | Determines the width of `tx_data` and `rx_data` |
 
-The lab environment uses **four ports (`PORTS = 4`)**. Other parameter values are build-time configuration choices; do not assume that an example bit pattern fixes the design's VC count or data width.
+The supplied `htax_defines.sv` configures **`PORTS = 4`, `VC = 2`, and `WIDTH = 64`**. Thus, the four TX interfaces and four RX interfaces each have a 64-bit data bus and 2-bit VC request/grant/SOT vectors. These are compile-time configuration macros in this lab, rather than fixed limits of the HTAX specification.
 
 ### Virtual channels
 
 A **virtual channel (VC)** identifies the logical traffic channel associated with a packet. Multiple VCs allow the interconnect and receiving FU to distinguish different traffic classes. HTAX uses VC-aware requests and grants to support arbitration, quality of service, and deadlock avoidance.
 
-For example, if `VC = 3`:
+In this build (`VC = 2`), for example:
 
 ```systemverilog
-tx_vc_req = 3'b010; // Request VC 1
-rx_sot    = 3'b010; // Packet starts on VC 1
+tx_vc_req = 2'b10; // Request VC 1
+rx_sot    = 2'b10; // Received packet starts on VC 1
 ```
 
 A `*_sot` vector identifies **one** active VC for the packet (one-hot); request/grant vectors may indicate **multiple** VCs.
@@ -139,12 +139,12 @@ The TX interface is the ingress path from an external FU into HTAX. It includes 
 ### Illustrative TX request
 
 ```systemverilog
-// Example only: PORTS=4, VC=3, destination Port 3, VC 1.
+// Example for this build: PORTS=4, VC=2, destination Port 3, VC 1.
 tx_outport_req = 4'b1000;
-tx_vc_req      = 3'b010;
+tx_vc_req      = 2'b10;
 
 // After the appropriate grant/handshake:
-tx_sot         = 3'b010;  // First beat; selected VC is 1
+tx_sot         = 2'b10;  // First beat; selected VC is 1
 // tx_data carries first, middle, and final beats on successive transfer cycles.
 // tx_eot marks the final beat.
 ```
@@ -220,91 +220,217 @@ The intended observable outcome is:
 
 ## 7. UVM Verification Environment
 
-The verification environment stimulates the real HTAX DUT through TX pins, observes both sides, and checks the delivered packets against expected transactions.
+The source-driven testbench uses **four active TX agents**, **four passive RX agents**, and **one shared packet-level scoreboard**. The DUT-facing signal interfaces are instantiated in the SystemVerilog top-level module, while the UVM class hierarchy is assembled under `htax_env`. All data-path monitors sample on **negedges** (the testbench driver drives on posedges).
+
+### 7.1 Top-level DUT and UVM component hierarchy
 
 ```text
-                     +------------------------------+
-                     |          UVM TEST            |
-                     | sequences / test scenarios   |
-                     +---------------+--------------+
-                                     |
-                                     v
-                     +------------------------------+
-                     | TX sequencers + TX drivers   |
-                     | Model external FU senders    |
-                     +---------------+--------------+
-                                     |
-                                     v
-                         TX interface signals
-                                     |
-                         +-----------+-----------+
-                         |         HTAX DUT      |
-                         |    4-port crossbar    |
-                         +-----------+-----------+
-                                     |
-                          RX interface signals
-                                     |
-                             RX-side FU model
-                           / grant control logic
-
-            TX interfaces                        RX interfaces
-                 |                                     |
-                 v                                     v
-       +--------------------+                +--------------------+
-       | 4 x TX monitors    |                | 4 x RX monitors    |
-       | observed requests, |                | reconstructed RX   |
-       | VC and TX payload  |                | VC and RX payload  |
-       +---------+----------+                +----------+---------+
-                 |                                      |
-                 | analysis_port.write()                | analysis_port.write()
-                 v                                      v
-       +--------------------------------------------------------+
-       |                    UVM SCOREBOARD                      |
-       |                                                        |
-       | exp_q[0]  exp_q[1]  exp_q[2]  exp_q[3]                  |
-       |  TX push_back(dest_port) -> RX pop_front(port)          |
-       |  Compare: VC / length / all data beats                  |
-       +--------------------------------------------------------+
+SystemVerilog module top                         [htax_top.sv]
+|
++-- clk, rst_n
++-- inst_htax_top : htax_top                     [HTAX DUT instance]
++-- inst_htax_tx_intf[0:3]                       [htax_tx_interface]
+|     +-- TX protocol assertions (SVA)
++-- inst_htax_rx_intf[0:3]                       [htax_rx_interface]
+|     +-- RX VC-grant stimulus logic
+|     +-- RX protocol assertions (SVA)
++-- uvm_config_db::set(..., "tx_vif" / "rx_vif", ...)
++-- run_test()  --> UVM test                       [test_lib.svh referenced]
+                     |
+                     +-- tb : htax_env            [htax_env.sv]
+                          |
+                          +-- tx_port[0..3] : htax_tx_agent_c (UVM_ACTIVE)
+                          |    +-- sequencer  : htax_sequencer_c
+                          |    +-- tx_driver  : htax_tx_driver_c
+                          |    +-- tx_monitor : htax_tx_monitor_c
+                          |
+                          +-- rx_port[0..3] : htax_rx_agent_c (UVM_PASSIVE)
+                          |    +-- rx_monitor : htax_rx_monitor_c
+                          |
+                          +-- htax_sb : htax_scoreboard_c
+                               +-- exp_q[0][$] ... exp_q[3][$]
+                               +-- tx0_export ... tx3_export
+                               +-- rx0_export ... rx3_export
 ```
 
-> **Diagram note:** TX/RX monitors only observe DUT interface traffic. The arrows to the scoreboard represent **transaction-level UVM analysis connections**, not RTL data wires.
+The actual UVM test class and the `test_lib.svh` contents were **not among the supplied files**. The hierarchy above shows the `tb` environment and components defined in the uploaded sources; the name `tb` is also used by the lab's test-side hierarchy in the existing verification workflow.
 
-### UVM component responsibilities
+### 7.2 End-to-end stimulus and checking paths
 
-| Component | Responsibility |
+```text
+  UVM TEST / SEQUENCE
+  simple_random_seq (15 htax_packet_c items)
+          |
+          v
+  +------------------------------------+
+  |  ACTIVE TX AGENT [i], i = 0..3     |
+  |                                    |
+  |  htax_sequencer_c                  |
+  |          | seq_item_export         |
+  |          v                         |
+  |  htax_tx_driver_c                  |
+  |          |                         |
+  |          | drives TX pins          |
+  |          v                         |
+  |  TX interface [i] --+              |
+  |                     |              |
+  |  htax_tx_monitor_c <-+ (observes)  |
+  +---------------------|--------------+
+                        | TX wires
+                        v
+          +-------------------------------+
+          |            HTAX DUT           |
+          |     four-port crossbar        |
+          +---------------+---------------+
+                          | RX wires
+                          v
+          +-------------------------------------+
+          | RX interface [j], j = 0..3          |
+          | - drives rx_vc_gnt (FU emulation)   |
+          | - implements RX assertions         |
+          |                                     |
+          | PASSIVE RX AGENT [j]                |
+          |   htax_rx_monitor_c (observes)      |
+          +------------------+------------------+
+                             |
+                             | rx_collect_port.write(rx_mon_packet)
+                             v
+                       +-----------------+
+                       |   SCOREBOARD    |
+                       | rxj_export      |
+                       | compare_pkt(j)  |
+                       +-----------------+
+
+ TX monitor [i] -- intended tx_collect_port.write(tx_mon_packet) -->
+                  scoreboard.txi_export --> exp_q[dest_port].push_back(...)
+
+ Note: The TX analysis path is connected in htax_env.sv, but the supplied
+       htax_tx_monitor_c.sv does not yet declare/create/write tx_collect_port.
+       See "Integration gap" below.
+```
+
+**Two separate communication mechanisms:** TX/RX interface signals are physical DUT connections. The monitor-to-scoreboard arrows are **UVM transaction-level analysis connections**: the monitors do not drive DUT data, and the scoreboard never forwards a real packet through the switch.
+
+### 7.3 TX agents: active senders and passive observers
+
+Every `htax_tx_agent_c` starts with `is_active = UVM_ACTIVE`. In `build_phase`, an active agent creates a `sequencer`, `tx_driver`, and `tx_monitor`; in `connect_phase`, it connects:
+
+```systemverilog
+tx_driver.seq_item_port.connect(sequencer.seq_item_export);
+```
+
+The TX driver receives each randomized `htax_packet_c` via `get_next_item(req)`, drives the TX pins on rising clock edges, then calls `item_done()`. It waits the randomized `delay`, requests the destination and VC mask, waits for a matching grant, selects one granted VC, drives the first beat with `tx_sot`, drives the remaining beats, asserts `tx_release_gnt` on the second-to-last beat and `tx_eot` on the last beat. A new packet is not driven until the previous item is complete. The separate TX monitor reconstructs a `htax_tx_mon_packet_c` by observing the granted destination, SOT/VC, and every beat through EOT at falling clock edges.
+
+**TX transaction generation (`htax_packet_c.sv`):**
+
+| Randomized field | Constraint in the uploaded source |
 |---|---|
-| **Test / sequences** | Generate traffic scenarios and coordinate simulation lifetime through UVM objections. |
-| **TX sequencer** | Supplies randomized or directed packet transactions to the TX driver. |
-| **TX driver** | Converts packet transactions into TX interface signal activity, acting as a sender FU. |
-| **TX monitor** | Passively reconstructs packets injected into HTAX and publishes expected transactions. |
-| **RX grant logic** | Models a receiver FU's willingness to accept VC traffic; separate from the passive RX monitor. |
-| **RX monitor** | Passively reconstructs delivered packets from `rx_sot` through `rx_eot`, inclusive. |
-| **Scoreboard** | Maintains per-destination expected queues and compares received packets to the oldest outstanding expectation. |
-| **Protocol assertions** | Check TX/RX interface protocol requirements independently of end-to-end payload matching, when enabled. |
+| `delay` | 1–20 cycles |
+| `dest_port` | 0 through `PORTS-1` (0–3 here) |
+| `vc` | Nonzero requested-VC **bit mask**, not a VC index |
+| `length` | 3–63 beats; weighted ranges 3–15 (50), 16–47 (40), 48–63 (10) |
+| `data[]` | `WIDTH`-bit dynamic array, `data.size() == length` |
+| Short packets | `length <= 15` implies `$countones(vc) == 1` |
 
-### RX monitor packet reconstruction
+The uploaded `htax_seqs.sv` declares `htax_base_seq` (which raises/drops a phase objection when `starting_phase` is set) and `simple_random_seq`, which generates **15** items with `` `uvm_do(req) ``. Other test or sequence classes may be referenced by the lab, but their definitions were not in the supplied batch.
 
-The RX monitor creates a new `htax_rx_mon_packet_c` object for each packet and records:
+### 7.4 RX agents and the receiving-FU grant model
+
+Each `htax_rx_agent_c` is **passive** (`is_active = UVM_PASSIVE`) and creates only `rx_monitor`. There is **no RX sequencer or RX driver** in the uploaded agent. Instead, `htax_rx_interface.sv` provides simple standalone grant-generation logic as part of the **SystemVerilog interface itself**:
+
+```systemverilog
+logic [VC-1:0] rx_vc_gnt = '0;
+logic tran_on = 0;
+
+always @(|rx_vc_req) begin
+    wait (tran_on == 0);
+    @(posedge clk);
+    rx_vc_gnt = rx_vc_req;
+end
+
+always @(posedge (|rx_sot)) tran_on = 1;
+always @(negedge rx_eot)    tran_on = 0;
+```
+
+This testbench-specific model waits for its transaction-active indication to clear before updating the grant at a clock edge. It is a simple FU emulator, **not** a full independent RX UVM agent and **not** a general-purpose credit/ready protocol model. In particular, the grant-update process triggers on changes to the reduction-OR of `rx_vc_req`, so it should not be described as responding to every possible per-bit change of the request vector.
+
+The passive RX monitor detects a nonzero `rx_sot` at the falling edge, creates one `htax_rx_mon_packet_c`, stores the physical RX `port` and the one-hot `vc` index, appends each `rx_data` beat into a dynamic array **including the EOT beat**, and forwards the completed object using:
+
+```systemverilog
+rx_collect_port.write(rx_mon_packet);
+```
+
+### 7.5 Virtual interface configuration
+
+The top module instantiates **four** TX interfaces and **four** RX interfaces, connects them to the DUT's `fu0`–`fu3` signals, and makes each interface available through `uvm_config_db`:
+
+```systemverilog
+uvm_config_db#(virtual htax_tx_interface)::set(
+    null, "*tx_port[0]*", "tx_vif", inst_htax_tx_intf[0]);
+uvm_config_db#(virtual htax_rx_interface)::set(
+    null, "*rx_port[0]*", "rx_vif", inst_htax_rx_intf[0]);
+// Equivalent assignments exist for ports 1, 2, and 3.
+```
+
+Each driver/monitor retrieves its corresponding handle during `build_phase` via `uvm_config_db::get()`. This allows one reusable agent class to operate on different physical interfaces without hard-coding hierarchical HDL paths.
+
+### 7.6 UVM analysis connections and the scoreboard
+
+`htax_env.sv` constructs the scoreboard as `htax_sb`. In its `connect_phase`, it specifies eight monitor-to-scoreboard connections (four TX and four RX). The four **RX connections are fully implemented** in the uploaded monitor and environment sources:
+
+```systemverilog
+rx_port[0].rx_monitor.rx_collect_port.connect(htax_sb.rx0_export);
+rx_port[1].rx_monitor.rx_collect_port.connect(htax_sb.rx1_export);
+rx_port[2].rx_monitor.rx_collect_port.connect(htax_sb.rx2_export);
+rx_port[3].rx_monitor.rx_collect_port.connect(htax_sb.rx3_export);
+```
+
+For each received packet, the respective scoreboard `write_rxN_export()` calls `compare_pkt(N, rx_mon_packet)`. The environment also assigns `rx_port[i].rx_monitor.port = i` so the RX packet records the actual physical destination.
+
+The environment **attempts** the corresponding four TX connections:
+
+```systemverilog
+tx_port[0].tx_monitor.tx_collect_port.connect(htax_sb.tx0_export);
+// ... tx1_export, tx2_export, tx3_export
+```
+
+Each `txN_export` is an analysis implementation (`uvm_analysis_imp_txN_export`) whose `write_txN_export()` calls `push_to_queue()` to populate the expected-packet queue. The scoreboard defines all eight `write_*_export()` callback functions using the `uvm_analysis_imp_decl` macros.
+
+> **Integration gap in the uploaded snapshot:** `htax_tx_monitor_c.sv` currently logs `TX_MON` but **does not declare, construct, or write to `tx_collect_port`**, despite the environment's references to it. As uploaded, that TX connection cannot compile. To complete the intended data path, add `uvm_analysis_port #(htax_tx_mon_packet_c) tx_collect_port;` to the TX monitor, construct it with `new("tx_collect_port", this)` in the constructor, and invoke `tx_collect_port.write(tx_mon_packet);` after the packet is reconstructed. Once applied, the intended TX→scoreboard path matches the diagram above. This README does not claim that fix was made to the supplied `.sv` file.
+
+### 7.7 Interface-level assertions (SVA)
+
+The uploaded SVA checkers are embedded **inside the SystemVerilog interfaces**, independent of the UVM scoreboard:
+
+| Interface | Properties present in the uploaded code |
+|---|---|
+| `htax_tx_interface.sv` | One-hot destination request; mutual presence of outport/VC requests; grant subset of request; SOT/EOT after a grant; single-cycle EOT; release-grant timing; SOT after prior EOT; ordered request/grant/SOT/release/EOT transfer sequence |
+| `htax_rx_interface.sv` | One-hot, one-cycle SOT; one-cycle EOT; RX VC grant held until its request/transaction-start condition |
+
+These check **control-protocol behavior**. The scoreboard separately checks **end-to-end destination, VC, length, and payload**. A scoreboard pass alone does not prove every protocol assertion passed; inspect simulator assertion diagnostics as well as UVM severity counts.
+
+### 7.8 RX monitor transaction reconstruction
+
+The RX monitor's output transaction (`htax_rx_mon_packet_c`) includes:
 
 | Field | Description |
 |---|---|
-| `port` | The **RX port** where the packet was observed. |
+| `port` | Physical RX port, set by the environment. |
 | `vc` | Index of the asserted bit in `rx_sot`. |
-| `length` | Number of observed `rx_data` beats, including SOT and EOT beats. |
-| `data[]` | Dynamic array containing each beat in order. |
-
-A typical algorithm is:
+| `length` | Number of observed `rx_data` beats, including SOT and EOT. |
+| `data[]` | Dynamic array of `WIDTH`-bit beats, in receive order. |
 
 ```text
 forever:
-    wait for rx_sot != 0 at the monitor's sampling edge
-    create packet, set port and decode VC
-    repeat:
-        append current rx_data to packet.data[]
-        increment packet.length
-        if rx_eot == 1: stop collecting this packet
-        wait for next sampling edge
-    log packet and publish it through rx_collect_port
+    wait for rx_sot != 0 on a falling clock edge
+    create a new packet; assign port and decode VC
+    do:
+        append the current rx_data beat
+        length++
+        if rx_eot: stop gathering beats
+        wait for the next falling edge
+    print RX_MON summary
+    rx_collect_port.write(packet)
 ```
 
 ## 8. Scoreboard Design
@@ -318,7 +444,7 @@ htax_tx_mon_packet_c exp_q[PORTS][$];
 
 ### Expected-packet insertion (TX side)
 
-Every TX monitor publishes a completed packet through a UVM analysis port. The scoreboard's TX write method uses the packet's `dest_port`:
+The **intended** flow is for every TX monitor to publish its completed packet through a UVM analysis port. The environment and scoreboard are already coded for this; the uploaded TX monitor still requires the analysis-port addition noted in Section 7.6. The scoreboard's TX write method uses the packet's `dest_port`:
 
 ```systemverilog
 if (mon_pkt.dest_port < 0 || mon_pkt.dest_port >= PORTS) begin
@@ -365,9 +491,9 @@ The scoreboard's correctness therefore relies on **both** during-run comparison 
 | `simple_random_test` | Random packets injected on one TX port | 15 TX / 15 RX | All four expected queues empty; zero UVM errors/fatals; TX and RX packets match. |
 | `multiport_test` | Random traffic on all four TX ports (15 per TX port in Lab 9) | 60 TX / 60 RX | All four expected queues empty; zero UVM errors/fatals; TX and RX packets match. |
 
-### Example observed result: `simple_random_test`
+### Previously observed log example: `simple_random_test`
 
-A local simulation produced the following summary:
+The following is a **previously shared run summary**, not a newly executed simulation of the exact uploaded source snapshot (which has the TX-monitor integration gap described above):
 
 ```text
 [TX_MON]    15 packets observed
@@ -380,13 +506,13 @@ UVM_ERROR: 0
 UVM_FATAL: 0
 ```
 
-This result is consistent with a successful 15-packet run; the detailed TX/RX log comparison provides an additional check. The 60-packet case above is an **expected test target**, not a claimed measured result.
+This result is consistent with a successful 15-packet run; the detailed TX/RX log comparison provides an additional check. The 60-packet case above is an **expected test target**, not a claimed measured result. The uploaded files include `simple_random_seq`, but **do not include** the definitions for `simple_random_test`, `multiport_test`, or the test library; those tests are referenced by the lab workflow rather than verified from this batch of sources.
 
 > **Lab-specific note:** The assignment handout describes a possible known `assert_gnt_subset_of_req` assertion failure in `multiport_test`, related to the DUT granting a VC that it did not request. Review assertion reports separately rather than treating `UVM_ERROR = 0` as a guarantee that no assertions fired.
 
 ## 10. Running the Simulation
 
-The CSCE 616 lab setup uses Cadence Xcelium (`xrun`) on the course server. From the assignment repository, after loading the course environment:
+The CSCE 616 lab workflow uses Cadence Xcelium (`xrun`) on the course server. The following paths and scripts refer to the **lab setup**, not files present in the supplied upload. Ensure that the TX monitor analysis port is completed and that the test library and `run.f` are available before running:
 
 ```bash
 source setupx.bash
@@ -429,39 +555,55 @@ diff -u tx.txt rx.txt
 
 Expected: **15 lines each** for `simple_random_test`, or **60 lines each** for `multiport_test`; `diff` should produce **no output**. Sorting checks identical packet summaries without assuming a global arrival order across different destination ports. The scoreboard separately checks FIFO order **within each destination**.
 
-## 11. Repository Structure
+## 11. Source File Inventory
 
-Key files from the CSCE 616 Lab 9 environment:
+The following is the **exact logical inventory of the 17 SystemVerilog source files supplied for this README update**. The files were uploaded as individual files, so the list is organized by function rather than claiming a particular Git repository directory layout.
 
 ```text
-work/
-├── tb/
-│   ├── htax_tx_driver_c.sv        # Drives TX interface signals
-│   ├── htax_tx_monitor_c.sv       # Captures transmitted packets
-│   ├── htax_rx_monitor_c.sv       # Captures received packets
-│   ├── htax_rx_mon_packet_c.sv    # RX packet transaction class
-│   ├── htax_rx_agent_c.sv         # Passive RX agent
-│   └── htax_scoreboard_c.sv       # Per-destination comparison queues
-├── test/
-│   └── multiport_test.sv          # Simultaneous multiport stimulus
-└── sim/
-    └── run.f                     # Xcelium compilation/run options
+Configuration and compilation
+  htax_defines.sv           PORTS=4, VC=2, WIDTH=64
+  htax_pkg.sv               UVM package and class includes
+  htax_top.sv               Simulation top, DUT wiring, config_db, run_test()
+
+DUT-facing interfaces and SVA
+  htax_tx_interface.sv      TX signals and TX SVA
+  htax_rx_interface.sv      RX signals, simple RX grant model, RX SVA
+
+Sequences and transaction models
+  htax_packet_c.sv          Randomized TX sequence item + constraints
+  htax_seqs.sv              htax_base_seq and simple_random_seq
+  htax_sequencer_c.sv       TX sequencer
+  htax_tx_mon_packet_c.sv   Monitored TX packet representation
+  htax_rx_mon_packet_c.sv   Monitored RX packet representation
+
+UVM agent components
+  htax_tx_agent_c.sv        Active TX agent (driver, sequencer, monitor)
+  htax_tx_driver_c.sv       Drives the TX pins
+  htax_tx_monitor_c.sv      Reconstructs TX packets (analysis port missing)
+  htax_rx_agent_c.sv        Passive RX agent (monitor only)
+  htax_rx_monitor_c.sv      Reconstructs RX packets and publishes them
+
+Environment and checking
+  htax_env.sv               4 TX agents + 4 RX agents + scoreboard connections
+  htax_scoreboard_c.sv      Expected FIFOs and end-to-end packet comparisons
 ```
 
-The complete repository may also contain the DUT, interfaces, TX agent and sequence classes, assertion files, and other tests; their exact filenames depend on the provided lab version.
+**Referenced but not supplied in this upload:** the actual DUT implementation (`htax_top` module), `test_lib.svh`, individual test class files (including `simple_random_test` and `multiport_test`), the simulator file list (`run.f`), and any course setup scripts. Accordingly, this document does not invent their implementation details or repository paths.
 
 ## 12. Verification Scope and Notes
 
 ### What this project checks
 
-- TX-to-RX packet delivery at the **requested destination**.
+- Intended end-to-end checking of TX-to-RX packet delivery at the **requested destination** (after connecting the missing TX analysis port).
 - Preservation of **VC**, **packet length**, and **payload data**.
 - Order-aware matching through **per-destination FIFO queues**.
 - Detection of **unexpected RX packets**, **content mismatches**, and **missing packets** at the end of simulation.
-- TX/RX interface protocol properties through assertions, when included and enabled.
+- TX/RX interface protocol properties through SVA already present in the supplied interface files, subject to compilation and assertion enablement.
 
 ### Important limitations
 
+- **As uploaded, the TX monitor lacks `tx_collect_port`**, while `htax_env` references it; this must be corrected before compiling the integrated scoreboard topology. See Section 7.6.
+- The uploaded bundle does not include the DUT implementation, UVM test definitions, or `run.f`, so the source snapshot was **not simulated as part of this README update**.
 - A passing test demonstrates correctness for **tested stimulus and checked properties**, not exhaustive functional correctness.
 - The exercise's scoreboard uses a **per-destination FIFO expectation model**; it does not model every optional HTAX buffering mode or every possible protocol feature.
 - Packet data in the provided RX transaction class is a `bit [WIDTH-1:0] data[]` dynamic array (a **2-state** type). Unknown (`X`) or high-impedance (`Z`) values on DUT signals are not preserved when stored in that field; separate four-state interface checks/assertions are needed to catch them.
