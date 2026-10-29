@@ -225,32 +225,30 @@ The source-driven testbench uses **four active TX agents**, **four passive RX ag
 ### 7.1 Top-level DUT and UVM component hierarchy
 
 ```text
-SystemVerilog module top                         [htax_top.sv]
-|
-+-- clk, rst_n
-+-- inst_htax_top : htax_top                     [HTAX DUT instance]
-+-- inst_htax_tx_intf[0:3]                       [htax_tx_interface]
-|     +-- TX protocol assertions (SVA)
-+-- inst_htax_rx_intf[0:3]                       [htax_rx_interface]
-|     +-- RX VC-grant stimulus logic
-|     +-- RX protocol assertions (SVA)
-+-- uvm_config_db::set(..., "tx_vif" / "rx_vif", ...)
-+-- run_test()  --> UVM test                       [test_lib.svh referenced]
-                     |
-                     +-- tb : htax_env            [htax_env.sv]
-                          |
-                          +-- tx_port[0..3] : htax_tx_agent_c (UVM_ACTIVE)
-                          |    +-- sequencer  : htax_sequencer_c
-                          |    +-- tx_driver  : htax_tx_driver_c
-                          |    +-- tx_monitor : htax_tx_monitor_c
-                          |
-                          +-- rx_port[0..3] : htax_rx_agent_c (UVM_PASSIVE)
-                          |    +-- rx_monitor : htax_rx_monitor_c
-                          |
-                          +-- htax_sb : htax_scoreboard_c
-                               +-- exp_q[0][$] ... exp_q[3][$]
-                               +-- tx0_export ... tx3_export
-                               +-- rx0_export ... rx3_export
+Packet Transmission Flow
+                   ========================
+
+      htax_seqs.sv
+            |
+            v
+   htax_sequencer_c.sv
+            |
+            v
+   htax_tx_driver_c.sv
+            |
+            v
+   htax_tx_interface.sv  <---- htax_tx_monitor_c.sv
+            |                         |
+            v                         | Expected packets
+        +----------+                  |
+        | HTAX DUT |                  |
+        +----------+                  |
+            |                         |
+            v                         v
+   htax_rx_interface.sv       htax_scoreboard_c.sv
+            |                         ^
+            v                         | Actual packets
+   htax_rx_monitor_c.sv --------------+
 ```
 
 The actual UVM test class and the `test_lib.svh` contents were **not among the supplied files**. The hierarchy above shows the `tb` environment and components defined in the uploaded sources; the name `tb` is also used by the lab's test-side hierarchy in the existing verification workflow.
