@@ -253,8 +253,4 @@ final_phase
 
 ```
 
-### 8.2 HTAX UVM Phase File
 
-| Phase | Width | Direction | Description |
-|---|---|---|---|
-| `tx_outport_req` | `[PORTS-1:0]` | **FU -> HTAX** | One-hot request for the destination output port. A sender requests the output port to which the packet should be delivered. |
