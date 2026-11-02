@@ -217,6 +217,11 @@ The scoreboard uses a **separate FIFO queue for each destination port**:
 
 ### 8.1 UVM Phase Flow Chart
 
+Only run_phase can contain timing control
+1. The whole enviornment complete all build_phase
+2. The whole enviornment complete all connect_phase
+3. All component runs run_phase simultaneously
+
 ```text
 
 htax_top.sv
