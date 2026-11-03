@@ -222,6 +222,8 @@ Only run_phase can contain timing control
 2. The whole enviornment complete all connect_phase
 3. All component runs run_phase simultaneously
 
+UVM uses Objection Mechanism to control termination of phases. See base_test.sv->run_phase(). 
+
 ```text
 
 htax_top.sv
@@ -258,4 +260,295 @@ final_phase
 
 ```
 
+### 8.2 UVM Testbench Flows
 
+#### 8.2.1 Overview
+
+UVM (Universal Verification Methodology) manages the verification environment through a predefined phase mechanism.
+
+**Key Concepts:**
+- UVM does NOT execute files according to the File Tree order.
+- Compilation order does NOT determine simulation execution order.
+- `run_test()` starts the UVM test and phase scheduler.
+- UVM phases are executed based on the Component Hierarchy.
+- Components execute their `run_phase()` tasks concurrently.
+
+#### 8.2.2 Complete UVM Execution Flow
+
+```text
+            +---------------------------+
+            |       Compilation         |
+            |---------------------------|
+            | Compile SV source files   |
+            | Modules, Classes, Packages|
+            +-------------+-------------+
+                          |
+                          v
+            +---------------------------+
+            |        Elaboration        |
+            |---------------------------|
+            | Instantiate top module    |
+            | Create DUT and Interfaces |
+            +-------------+-------------+
+                          |
+                          v
+            +---------------------------+
+            |       Simulation          |
+            |---------------------------|
+            | Execute initial blocks    |
+            | at simulation time 0      |
+            +-------------+-------------+
+                          |
+                          v
+            +---------------------------+
+            |    uvm_config_db::set()   |
+            |---------------------------|
+            | Pass interface handles   |
+            | to UVM components         |
+            +-------------+-------------+
+                          |
+                          v
+            +---------------------------+
+            |        run_test()         |
+            |---------------------------|
+            | Create selected UVM test  |
+            | Start UVM phase scheduler |
+            +-------------+-------------+
+                          |
+                          v
+            +---------------------------+
+            |        build_phase        |
+            |---------------------------|
+            | Create UVM components     |
+            | Retrieve virtual interface|
+            +-------------+-------------+
+                          |
+                          v
+            +---------------------------+
+            |       connect_phase       |
+            |---------------------------|
+            | Connect TLM ports         |
+            | Driver <-> Sequencer      |
+            +-------------+-------------+
+                          |
+                          v
+            +---------------------------+
+            |        run_phase          |
+            |---------------------------|
+            | Generate transactions     |
+            | Drive DUT signals         |
+            | Monitor DUT outputs       |
+            | Check results             |
+            +-------------+-------------+
+                          |
+                          v
+            +---------------------------+
+            |         End of Test       |
+            |---------------------------|
+            | Extract / Check / Report  |
+            | Final Phase              |
+            +---------------------------+
+```
+
+#### 8.2.3 UVM Phase Execution Order
+
+```text
+              UVM Phase Scheduler
+                       |
+                       v
+             +-------------------+
+             |    build_phase    |  Top-Down
+             +---------+---------+
+                       |
+                       v
+             +-------------------+
+             |   connect_phase   |  Bottom-Up
+             +---------+---------+
+                       |
+                       v
+             +--------------------------+
+             | end_of_elaboration_phase |
+             +------------+-------------+
+                          |
+                          v
+             +--------------------------+
+             | start_of_simulation_phase|
+             +------------+-------------+
+                          |
+                          v
+             +-------------------+
+             |     run_phase     |  Concurrent
+             +---------+---------+
+                       |
+                       v
+             +-------------------+
+             |   extract_phase   |
+             +---------+---------+
+                       |
+                       v
+             +-------------------+
+             |    check_phase    |
+             +---------+---------+
+                       |
+                       v
+             +-------------------+
+             |    report_phase   |
+             +---------+---------+
+                       |
+                       v
+             +-------------------+
+             |    final_phase    |
+             +-------------------+
+```
+
+**Notes:**
+- `build_phase`: Creates UVM components and retrieves configuration data.
+- `connect_phase`: Connects Driver, Sequencer, Monitor, and Scoreboard.
+- `run_phase`: Executes verification tasks and consumes simulation time.
+- `extract_phase`: Collects final verification results.
+- `check_phase`: Checks whether verification completed successfully.
+- `report_phase`: Reports errors, warnings, and verification results.
+- `final_phase`: Performs final cleanup.
+
+The diagram is simplified. UVM also supports runtime phases such as `reset_phase`, `configure_phase`, and `main_phase`.
+
+#### 8.2.4 UVM Component Hierarchy
+
+Example: HTAX Verification Environment
+
+```text
+                  uvm_test_top
+                       |
+                       v
+                 +-----------+
+                 | htax_env  |
+                 +-----+-----+
+                       |
+         +-------------+-------------+
+         |             |             |
+         v             v             v
+    tx_port[0]    tx_port[1]    tx_port[2] ...
+         |
+         +---------------------+
+         |          |          |
+         v          v          v
+      Driver     Monitor    Sequencer
+         |          |          |
+         v          v          v
+    Drive DUT   Observe DUT   Execute
+     Signals     Signals      Sequences
+```
+
+**Phase Execution Rules:**
+
+- `build_phase`: Parent components execute before children (Top-Down).
+- `connect_phase`: Child components execute before parents (Bottom-Up).
+- `run_phase`: All component `run_phase()` tasks execute concurrently.
+
+#### 8.2.5 Virtual Interface Configuration
+
+The top-level module passes physical interface instances to UVM components through `uvm_config_db`.
+
+```text
+            SystemVerilog top.sv
+                     |
+                     v
+          Physical Interface Instance
+          inst_htax_tx_intf[0]
+                     |
+                     | uvm_config_db::set()
+                     v
+          +----------------------+
+          | UVM Configuration DB |
+          | Key: "tx_vif"        |
+          +----------+-----------+
+                     |
+                     | uvm_config_db::get()
+                     v
+          +----------------------+
+          |    UVM TX Driver     |
+          |                      |
+          | virtual interface vif|
+          +----------+-----------+
+                     |
+                     v
+                DUT Signals
+```
+
+Example in `top.sv`:
+
+```systemverilog
+uvm_config_db#(virtual htax_tx_interface)::set(
+    null,
+    "*tx_port[0]*",
+    "tx_vif",
+    inst_htax_tx_intf[0]
+);
+```
+
+Example in Driver `build_phase()`:
+
+```systemverilog
+function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+
+    if (!uvm_config_db#(virtual htax_tx_interface)::get(
+        this, "", "tx_vif", vif
+    ))
+        `uvm_fatal("NO_VIF", "Virtual interface not found")
+endfunction
+```
+
+#### 8.2.6 UVM Transaction Flow During run_phase
+
+```text
+             +----------------+
+             |    Sequence    |
+             | Generate Items |
+             +-------+--------+
+                     |
+                     v
+             +----------------+
+             |   Sequencer    |
+             | Manage Items   |
+             +-------+--------+
+                     |
+                     v
+             +----------------+
+             |     Driver     |
+             | Drive Signals  |
+             +-------+--------+
+                     |
+                     v
+             +----------------+
+             |      DUT       |
+             |      HTAX      |
+             +-------+--------+
+                     |
+                     v
+             +----------------+
+             |     Monitor    |
+             | Capture Signals|
+             +-------+--------+
+                     |
+                     v
+             +----------------+
+             |   Scoreboard   |
+             | Compare Results|
+             +----------------+
+```
+
+**Important:** The diagram represents the logical transaction flow. Driver, Monitor, and Scoreboard operate concurrently during `run_phase`, rather than executing sequentially.
+
+
+#### 8.2.7 How to Trace UVM Execution
+
+1. Find the `initial` block in `top.sv`.
+2. Locate the `run_test()` call.
+3. Check `+UVM_TESTNAME` to identify the selected Test Class.
+4. Examine the Test's `build_phase()` to identify created components.
+5. Follow the UVM Component Hierarchy.
+6. Examine `connect_phase()` to understand TLM connections.
+7. Examine `run_phase()` to understand transaction generation, driving, monitoring, and checking.
+
+**UVM execution is controlled by the Phase Scheduler and Component Hierarchy, NOT by the order of `.sv` files in the project.**
