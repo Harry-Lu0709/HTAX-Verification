@@ -165,7 +165,7 @@ Packet Transmission Flow
 
       htax_seqs.sv
             |
-            |   --- connect seq with sequencer in _test.sv -> run_phase() -> .start
+            |   --- connect seq with sequencer in _agent_c.sv -> connect_phase()
             |
             v
    htax_sequencer_c.sv
