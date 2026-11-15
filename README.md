@@ -258,7 +258,6 @@ run_phase
     | htax_tx_driver_c.sv     Drive TX Signals
     | htax_tx_monitor_c.sv    Capture TX Packets
     | htax_rx_monitor_c.sv    Capture RX Packets
-    | htax_scoreboard_c.sv    Compare TX/RX Packets via write()
     v
 extract_phase
     | UVM default behavior
