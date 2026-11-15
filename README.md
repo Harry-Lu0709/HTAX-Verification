@@ -162,25 +162,43 @@ The source-driven testbench uses **four active TX agents**, **four passive RX ag
 ```text
 Packet Transmission Flow
 =================================================
+        htax_tx_sequence_c
+                |
+                | start(sequencer)
+                v
+        htax_sequencer_c
+                |
+                | seq_item_port
+                v
+        htax_tx_driver_c
+                |
+                | Drive signals
+                v
+        htax_tx_interface --------------+
+                |                       |
+                |                       v
+                |                htax_tx_monitor_c
+                |                       |
+                v                       | Expected packets
+          +------------+                |
+          |  HTAX DUT  |                |
+          +------------+                |
+                |                       |
+                v                       |
+        htax_rx_interface               |
+                |                       |
+                |                       |
+                v                       |
+        htax_rx_monitor_c               |
+                |                       |
+                | Actual packets        |
+                v                       v
+          +-------------------------------+
+          |       htax_scoreboard_c       |
+          |                               |
+          |   Compare Expected vs Actual  |
+          +-------------------------------+
 
-   htax_sequencer_c.sv
-            |
-            v
-   htax_tx_driver_c.sv
-            |
-            v
-   htax_tx_interface.sv  <---- htax_tx_monitor_c.sv
-            |                         |
-            v                         | Expected packets
-        +----------+                  |
-        | HTAX DUT |                  |
-        +----------+                  |
-            |                         |
-            v                         v
-   htax_rx_interface.sv       htax_scoreboard_c.sv
-            |                         ^
-            v                         | Actual packets
-   htax_rx_monitor_c.sv --------------+
 ```
 
 The actual UVM test class and the `test_lib.svh` contents were **not among the supplied files**. The hierarchy above shows the `tb` environment and components defined in the uploaded sources; the name `tb` is also used by the lab's test-side hierarchy in the existing verification workflow.
