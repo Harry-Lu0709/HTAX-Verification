@@ -163,11 +163,6 @@ The source-driven testbench uses **four active TX agents**, **four passive RX ag
 Packet Transmission Flow
 =================================================
 
-      htax_seqs.sv
-            |
-            |   --- connect seq with sequencer in _agent_c.sv -> connect_phase()
-            |
-            v
    htax_sequencer_c.sv
             |
             v
