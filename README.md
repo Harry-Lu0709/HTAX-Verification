@@ -215,7 +215,7 @@ The scoreboard uses a **separate FIFO queue for each destination port**:
 | Test | TX traffic | Expected packet count | Success criteria |
 |---|---|---:|---|
 | `simple_random_test` | Random packets injected on one TX port | 15 TX / 15 RX | All four expected queues empty; zero UVM errors/fatals; TX and RX packets match. |
-| `multiport_test` | Random traffic on all four TX ports (15 per TX port in Lab 9) | 60 TX / 60 RX | All four expected queues empty; zero UVM errors/fatals; TX and RX packets match. |
+| `multiport_test` | Random traffic on all four TX ports | 60 TX / 60 RX | All four expected queues empty; zero UVM errors/fatals; TX and RX packets match. |
 | `mix_sequence_test` | Sequentially runs six directed/randomized sequences: fixed destination, short packets, long packets with short delays, medium packets with fixed VC, port sweep, and random traffic | Depends on the sequence definitions | All generated TX/RX packets match; all four queues empty; zero UVM errors/fatals and no unexpected assertion failures. |
 
 
