@@ -544,14 +544,6 @@ endfunction
 ```
 
 **Important:** The diagram represents the logical transaction flow. Driver, Monitor, and Scoreboard operate concurrently during `run_phase`, rather than executing sequentially.
-
-
-#### 8.2.7 How to Trace UVM Execution
-
-1. Find the `initial` block in `top.sv`.
-2. Locate the `run_test()` call.
-3. Check `+UVM_TESTNAME` to identify the selected Test Class.
-4. Examine the Test's `build_phase()` to identify created components.
 5. Follow the UVM Component Hierarchy.
 6. Examine `connect_phase()` to understand TLM connections.
 7. Examine `run_phase()` to understand transaction generation, driving, monitoring, and checking.
