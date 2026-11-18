@@ -24,11 +24,6 @@ Each HTAX port is bidirectional and exposes two distinct interfaces:
 - **TX (transmit):** An external Function Unit(FU) injects a packet into HTAX through its TX interface.
 - **RX (receive):** HTAX forwards a packet to an external FU through that FU's RX interface.
 
-A packet sent from FU 0 to FU 3 follows this path:
-
-```text
-FU 0 -> Port 0 TX -> HTAX arbitration / switch fabric -> Port 3 RX -> FU 3
-```
 
 The transmitter selects a destination **output port** and requests one or more **virtual channels (VCs)**. The crossbar handles contention and coordinates the transfers. The receiver participates in VC-level flow control by issuing receive-side grants.
 
@@ -87,8 +82,6 @@ The supplied `htax_defines.sv` configures **`PORTS = 4`, `VC = 2`, and `WIDTH = 
 ### Virtual channels
 
 A **virtual channel (VC)** is a logical communication channel that allows multiple traffic classes to share the same physical data path while being managed independently.
-
-Virtual channels are important for three main reasons:
 
 -**Quality of Service (QoS):** Different traffic classes can receive different priorities, allowing latency-sensitive packets to be serviced ahead of lower-priority traffic.
 
